@@ -1,0 +1,44 @@
+services:
+  finguard-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: finguard-api:latest
+    container_name: finguard-api
+    ports:
+      - "8000:8000"
+    environment:
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set in your .env file}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
+      # Defaults to a SQLite file persisted in the finguard-db volume below.
+      # Swap this for a Postgres URL in production, e.g.:
+      # DATABASE_URL: postgresql://finguard:finguard@finguard-db:5432/finguard
+      DATABASE_URL: ${DATABASE_URL:-sqlite:///./data/finguard.db}
+    volumes:
+      - finguard-db:/app/data
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  finguard-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    image: finguard-frontend:latest
+    container_name: finguard-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - finguard-api
+    restart: unless-stopped
+
+volumes:
+  finguard-db:
