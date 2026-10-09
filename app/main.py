@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.api.routes import router
 from app.db import Base, engine, SessionLocal
@@ -13,7 +14,14 @@ from app.auth import hash_password
 async def lifespan(app: FastAPI):
     # Creates the users table if it doesn't exist yet (SQLite/Postgres both fine).
     # For a bigger production schema, swap this for Alembic migrations.
-    Base.metadata.create_all(bind=engine)
+    # With several uvicorn workers, all of them start at the same instant on a
+    # brand-new database. Whoever loses the race gets "table already exists",
+    # which is harmless, so ignore that one case and re-raise anything else.
+    try:
+        Base.metadata.create_all(bind=engine)
+    except OperationalError as exc:
+        if "already exists" not in str(exc):
+            raise
 
     # Seed a demo account so the API is testable immediately after `docker
     # compose up`, without requiring a manual /auth/register call first.
@@ -22,6 +30,8 @@ async def lifespan(app: FastAPI):
         if not db.query(User).filter(User.username == "demo").first():
             db.add(User(username="demo", hashed_password=hash_password("demopassword")))
             db.commit()
+    except IntegrityError:
+        db.rollback()  # another worker seeded the demo user first
     finally:
         db.close()
 
